@@ -2,65 +2,60 @@ import streamlit as st
 import mediapipe as mp
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
+from streamlit_webrtc import webrtc_streamer, VideoProcessorBase
+import av
 import cv2
-import numpy as np
-import time
 
-# --- 1. PAGE SETUP ---
-st.set_page_config(page_title="AI Fitness Gate", layout="wide")
-st.title("🏋️ AI Fitness Gatekeeper")
+# --- 1. SETUP ---
+st.set_page_config(page_title="FitGate AI", page_icon="💪")
+st.title("💪 FitGate AI: Vision-Based Workout")
 
-# --- 2. AI MODEL SETUP (Outside the loop) ---
-# We use @st.cache_resource so the "brain" file loads only once.
-@st.cache_resource
-def initialize_landmarker():
-    model_path = 'pose_landmarker_lite.task' # Ensure this file is on GitHub
-    base_options = python.BaseOptions(model_asset_path=model_path)
-    options = vision.PoseLandmarkerOptions(
-        base_options=base_options,
-        running_mode=vision.RunningMode.VIDEO
-    )
-    return vision.PoseLandmarker.create_from_options(options)
+if 'count' not in st.session_state:
+    st.session_state.count = 0
+if 'stage' not in st.session_state:
+    st.session_state.stage = "up"
 
-landmarker = initialize_landmarker()
+# --- 2. AI MODEL LOADING ---
+# Ensure pose_landmarker_lite.task is in your GitHub!
+model_path = 'pose_landmarker_lite.task'
+base_options = python.BaseOptions(model_asset_path=model_path)
+options = vision.PoseLandmarkerOptions(
+    base_options=base_options,
+    running_mode=vision.RunningMode.VIDEO
+)
+detector = vision.PoseLandmarker.create_from_options(options)
 
-# --- 3. SIDEBAR / SETTINGS ---
-with st.sidebar:
-    st.header("Settings")
-    injury = st.selectbox("Select Injury Area:", ["None", "Knee", "Shoulder"])
-    target_reps = st.slider("Target Reps:", 1, 10, 5)
+# --- 3. VIDEO PROCESSING LOGIC ---
+class WorkoutProcessor(VideoProcessorBase):
+    def recv(self, frame):
+        img = frame.to_ndarray(format="bgr24")
+        
+        # Convert for MediaPipe
+        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+        timestamp = int(cv2.getTickCount() / cv2.getTickFrequency() * 1000)
+        
+        # Detect landmarks
+        result = detector.detect_for_video(mp_image, timestamp)
+        
+        if result.pose_landmarks:
+            landmarks = result.pose_landmarks[0]
+            # Use Shoulder Y (Landmark 11/12) for Pushup Logic
+            shoulder_y = (landmarks[11].y + landmarks[12].y) / 2
+            
+            # Simple Counting Logic
+            if shoulder_y > 0.6: # 'Down' position
+                st.session_state.stage = "down"
+            if shoulder_y < 0.4 and st.session_state.stage == "down": # 'Up' position
+                st.session_state.stage = "up"
+                st.session_state.count += 1
 
-# --- 4. THE CAMERA LOOP ---
-st.subheader("Complete your workout to unlock social media!")
-frame_placeholder = st.empty() # Placeholder for the video feed
-stop_button = st.button("Stop Workout")
+        return av.VideoFrame.from_ndarray(img, format="bgr24")
 
-# Use OpenCV to capture video
-cap = cv2.VideoCapture(0)
+# --- 4. THE LIVE CAMERA GATE ---
+webrtc_streamer(key="workout", video_processor_factory=WorkoutProcessor)
 
-while cap.isOpened() and not stop_button:
-    success, frame = cap.read()
-    if not success:
-        st.error("Camera not detected.")
-        break
+st.metric("Reps Completed", st.session_state.count)
 
-    # Convert frame for MediaPipe
-    rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_frame)
-    
-    # Run Detection (Requires timestamp for VIDEO mode)
-    timestamp = int(time.time() * 1000)
-    result = landmarker.detect_for_video(mp_image, timestamp)
-
-    # --- 5. YOUR FITNESS LOGIC GOES HERE ---
-    if result.pose_landmarks:
-        # Check coordinates and count reps
-        # Example: st.write(f"Shoulder Y: {result.pose_landmarks[0][11].y}")
-        pass
-
-    # Display the live feed
-    frame_placeholder.image(rgb_frame, channels="RGB")
-
-cap.release()
-
-
+if st.session_state.count >= 5:
+    st.success("🎯 Goal Reached! Social Media Unlocked.")
+    st.link_button("Open Instagram", "https://instagram.com")
