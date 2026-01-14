@@ -1,6 +1,9 @@
 streamlit
-mediapipe==0.10.14
+mediapipe
 opencv-python-headless
+streamlit-webrtc
+av
+
 
 
 
