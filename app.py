@@ -38,7 +38,7 @@ stop_button = st.button("Stop Workout")
 # Use OpenCV to capture video
 cap = cv2.VideoCapture(0)
 
-while cap.is_opened() and not stop_button:
+while cap.isOpened() and not stop_button:
     success, frame = cap.read()
     if not success:
         st.error("Camera not detected.")
@@ -62,4 +62,5 @@ while cap.is_opened() and not stop_button:
     frame_placeholder.image(rgb_frame, channels="RGB")
 
 cap.release()
+
 
